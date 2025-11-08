@@ -1,0 +1,20 @@
+{
+    "name": "grange-fencing/mysql-lite",
+    "description": "LightWeight MySql Connector Library",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "GrangeFencing\\MySqlLite\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Craig Hancock",
+            "email": "c.hancock@grangefencing.co.uk"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+      "ext-pdo": "*"
+    }
+}
