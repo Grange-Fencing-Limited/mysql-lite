@@ -3,7 +3,6 @@
     namespace GrangeFencing\MySqlLite;
 
     use Exception;
-    use PDO;
     use PDOException;
     use PDOStatement;
 
@@ -11,6 +10,7 @@
      * Lightweight helper for executing PDO statements and handling common API responses.
      *
      * This class wraps a MySqlConnection and a prepared PDOStatement to run queries,
+     * firstRow
      * automatically cast values, and optionally convert empty results into HTTP
      * responses (204/401/403/409) via the Responses helper.
      *
@@ -21,6 +21,8 @@
      */
     class MySqlTable {
 
+        private NoRowsHandler $noRowsHandler;
+
         /**
          * Database connection wrapper. Contains the PDO connection and connection-level flags.
          * @var MySqlConnection|null
@@ -28,20 +30,10 @@
         protected ?MySqlConnection $db = null;
 
         /**
-         * Prepared statement to be executed. Set by prepareStatement()/prepareSql().
+         * Prepared statement to be executed. Set by prepareSql().
          * @var PDOStatement|null
          */
         public ?PDOStatement $stmt;
-
-        private bool $onNoRowsWill204 = false;
-        private bool $onNoRowsWill401 = false;
-        private bool $onNoRowsWill403 = false;
-        private bool $onNoRowsWill409 = false;
-
-        private bool $atomicOnNoRowsWill204 = false;
-        private bool $atomicOnNoRowsWill401 = false;
-        private bool $atomicOnNoRowsWill403 = false;
-        private bool $atomicOnNoRowsWill409 = false;
 
         /**
          * Atomic flag to make singleRowReturn apply only to the next execute() call.
@@ -50,7 +42,7 @@
         private bool $atomicSingleRowReturn = false;
 
         /**
-         * When enabled the execute() will return the first row as an associative array/object
+         * When enabled, execute() will return the first row as an associative array/object
          * instead of an array of rows.
          * @var bool
          */
@@ -76,13 +68,6 @@
         public bool $wasSuccess = false;
 
         /**
-         * Custom messages used when automatic response generation is enabled for the respective codes.
-         */
-        private string $messageOn401 = "Invalid API key or key not set";
-        private string $messageOn403 = "You do not have permission to complete this action";
-        private string $messageOn409 = "The server was unable to handle this request to an existing record causing a conflict";
-
-        /**
          * When execute() catches an exception it will be stored here for callers to inspect.
          * @var Exception|null
          */
@@ -100,24 +85,15 @@
         public int $rowCount = 0;
 
         /**
-         * Prepare a SQL statement using the internal connection.
-         *
-         * @param string $sql SQL to prepare.
-         * @return void
-         */
-        public function prepareStatement($sql): void {
-
-            $this->stmt = $this->db->conn->prepare($sql);
-        }
-
-        /**
          * Class constructor - accepts a MySqlConnection instance.
          *
          * @param MySqlConnection $database The database connection wrapper instance.
          */
-        public function __construct($database) {
+        public function __construct(MySqlConnection $database) {
 
             $this->db = $database;
+            $this->noRowsHandler = new NoRowsHandler();
+
         }
 
         /**
@@ -127,19 +103,23 @@
          * - allRows : returns ->data as-is.
          *
          * @param string $property Property name requested.
+         *
          * @return mixed|null
          */
-        public function __get($property) {
+        public function __get(string $property) {
 
             if($property === 'firstRow') {
                 if(!empty($this->data)) {
                     return $this->data[0];
                 }
-                return [];
+                return null;
             }
 
             if ($property === 'allRows') {
-                return $this->data;
+                if (!empty($this->data)) {
+                    return $this->data;
+                }
+                return null;
             }
 
             return null;
@@ -177,10 +157,7 @@
          *       204 response.
          */
         public function automatic204(bool $enabled = true, bool $atomic = false): static {
-
-            $this->atomicOnNoRowsWill204 = $atomic;
-            $this->onNoRowsWill204 = $enabled;
-
+            $this->noRowsHandler->set(204, $enabled, $atomic);
             return $this;
         }
 
@@ -214,11 +191,7 @@
          *       allows for granular control over which SQL executions in a batch request should return a 401 response.
          */
         public function automatic401(bool $enabled = true, string $message = "Unauthorized Access", bool $atomic = false): static {
-
-            $this->atomicOnNoRowsWill401 = $atomic;
-            $this->onNoRowsWill401 = $enabled;
-            $this->messageOn401 = $message;
-
+            $this->noRowsHandler->set(401, $enabled, $atomic, $message);
             return $this;
         }
 
@@ -251,11 +224,7 @@
          *       allows for granular control over which SQL executions in a batch request should return a 403 response.
          */
         public function automatic403(string $message = "You do not have permission to complete this action", bool $enabled = true, bool $atomic = false): static {
-
-            $this->atomicOnNoRowsWill403 = $atomic;
-            $this->onNoRowsWill403 = $enabled;
-            $this->messageOn403 = $message;
-
+            $this->noRowsHandler->set(403, $enabled, $atomic, $message);
             return $this;
         }
 
@@ -289,11 +258,7 @@
          *       409 response.
          */
         public function automatic409(string $message = "The server was unable to handle this request to an existing record causing a conflict", bool $enabled = true, bool $atomic = false): static {
-
-            $this->atomicOnNoRowsWill409 = $atomic;
-            $this->onNoRowsWill409 = $enabled;
-            $this->messageOn409 = $message;
-
+            $this->noRowsHandler->set(409, $enabled, $atomic, $message);
             return $this;
         }
 
@@ -368,7 +333,12 @@
          *
          * @return static Returns the instance of the class to allow for method chaining.
          */
-        public function setProperty(string $property, mixed $value, bool $upperCase = false, bool $withWildCards = false): static {
+        public function setProperty(
+            string $property,
+            mixed $value,
+            bool $upperCase = false,
+            bool $withWildCards = false
+        ): static {
 
             if($upperCase && is_string($value)) {
                 $value = strtoupper($value);
@@ -376,8 +346,11 @@
             if(is_string($value)) {
                 $value = trim($value);
             }
-            if(is_string($value) && $withWildCards && $value !== "%") {
-                $value = "%" . $value . "%";
+            if(is_string($value) && $withWildCards) {
+                // Normalize wildcards: trim extra % from both ends
+                $value = trim($this->$property, '%');
+                // If the result is empty, fallback to a single '%'
+                $value = $value === '' ? '%' : "%{$value}%";
             }
 
             $this->$property = $value;
@@ -398,7 +371,14 @@
          *
          * @return static Returns the instance of the class to allow for method chaining.
          */
-        public function setPropertyIf(bool $condition, string $property, mixed $value, bool $upperCase = false, mixed $else = "__UNDEFINED__", bool $encrypted = false): static {
+        public function setPropertyIf(
+            bool $condition,
+            string $property,
+            mixed $value,
+            bool $upperCase = false,
+            mixed $else = "__UNDEFINED__",
+            bool $encrypted = false
+        ): static {
 
             if(!$condition) {
                 if($else !== "__UNDEFINED__") {
@@ -436,8 +416,11 @@
             } else {
                 $this->$property = $_POST[$postKey] ?? null;
             }
-            if($withWildCards && is_string($this->$property) && $this->$property !== "%") {
-                $this->$property = "%" . $this->$property . "%";
+            if($withWildCards && is_string($this->$property)) {
+                // Normalize wildcards: trim extra % from both ends
+                $value = trim($this->$property, '%');
+                // If the result is empty, fallback to a single '%'
+                $this->$property = $value === '' ? '%' : "%{$value}%";
             }
             if($upperCase && is_string($this->$property)) {
                 $this->$property = strtoupper($this->$property);
@@ -460,7 +443,11 @@
          *
          * @return static Returns the instance of the class to allow for method chaining.
          */
-        public function setPropertyFromSession(string $property, string $sessionKey, mixed $default = "__UNDEFINED__"): static {
+        public function setPropertyFromSession(
+            string $property,
+            string $sessionKey,
+            mixed $default = "__UNDEFINED__"
+        ): static {
 
             if($default !== "__UNDEFINED__") {
                 $this->$property = $_SESSION[$sessionKey] ?? $default;
@@ -504,6 +491,21 @@
         }
 
         /**
+         * Binds a value to a parameter in the prepared statement.
+         *
+         * @param string $parameter The parameter placeholder in the SQL statement.
+         * @param mixed $value The value to bind to the parameter.
+         * @return static Returns the instance of the class to allow for method chaining.
+         */
+        public function bindValue(string $parameter, mixed $value): static {
+
+            $this->stmt->bindValue($parameter, $value);
+
+            return $this;
+
+        }
+
+        /**
          * Executes the prepared SQL statement and handles various response scenarios.
          * This function manages the execution of the SQL statement, handles potential
          * exceptions, and processes the result set, including automatic response handling
@@ -528,9 +530,9 @@
 
                 if(
                     $e->getCode() == MYSQL_INTEGRITY_CONSTRAINT_VIOLATION &&
-                    $this->onNoRowsWill409
+                    $this->noRowsHandler->isSet(409)
                 ) {
-                    Responses::conflict($this->messageOn409);
+                    $this->noRowsHandler->handle(0);
                 }
 
                 $this->failureCause = $e;
@@ -541,7 +543,8 @@
 
             $this->wasSuccess = true;
             $this->rowCount = $this->stmt->rowCount();
-            $this->handleNoRowsCases();
+            $this->noRowsHandler->handle($this->rowCount);
+            $this->noRowsHandler->resetAtomic();
             $this->resetAtomicFlags();
 
             if(!$this->noDataSave) {
@@ -559,42 +562,12 @@
         }
 
         /**
-         * Logs an error message.
-         *
-         * @param string $message The error message to log.
-         *
-         * @return void
-         */
-        private function logError(string $message): void {
-            if($this->db->debugToConsole) {
-                print_r($message);
-            }
-            error_log($message);
-        }
-
-        /**
          * Resets atomic flags after execution.
          *
          * @return void
          */
         private function resetAtomicFlags(): void {
 
-            if($this->atomicOnNoRowsWill204) {
-                $this->onNoRowsWill204 = false;
-                $this->atomicOnNoRowsWill204 = false;
-            }
-            if($this->atomicOnNoRowsWill401) {
-                $this->onNoRowsWill401 = false;
-                $this->atomicOnNoRowsWill401 = false;
-            }
-            if($this->atomicOnNoRowsWill403) {
-                $this->onNoRowsWill403 = false;
-                $this->atomicOnNoRowsWill403 = false;
-            }
-            if($this->atomicOnNoRowsWill409) {
-                $this->onNoRowsWill409 = false;
-                $this->atomicOnNoRowsWill409 = false;
-            }
             if($this->atomicNoDataSave) {
                 $this->noDataSave = false;
                 $this->atomicNoDataSave = false;
@@ -606,28 +579,17 @@
         }
 
         /**
-         * Handles cases where no rows are affected by the last SQL execution.
-         * Depending on the configured flags, this may trigger automatic HTTP responses
-         * such as 204 No Content, 401 Unauthorized, 403 Forbidden, or 409 Conflict.
+         * Logs an error message.
+         *
+         * @param string $message The error message to log.
          *
          * @return void
          */
-        private function handleNoRowsCases(): void {
-
-            if($this->rowCount == 0) {
-                if($this->onNoRowsWill204) {
-                    Responses::noContent();
-                }
-                if($this->onNoRowsWill401) {
-                    Responses::unauthorized($this->messageOn401);
-                }
-                if($this->onNoRowsWill403) {
-                    Responses::accessError($this->messageOn403);
-                }
-                if($this->onNoRowsWill409) {
-                    Responses::conflict($this->messageOn409);
-                }
+        private function logError(string $message): void {
+            if($this->db->debugToConsole) {
+                print_r($message);
             }
+            error_log($message);
         }
 
         /**
