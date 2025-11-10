@@ -477,7 +477,7 @@
                 }
 
                 $this->failureCause = $e;
-                $this->logError("PDOException: " . $e->getMessage());
+                $this->logError("PDOException: " . $e->getMessage() . "\n" . $e->getTraceAsString());
                 Responses::serverError();
 
             }
@@ -506,7 +506,6 @@
          * @return void
          */
         private function logError(string $message): void {
-
             if($this->db->debugToConsole) {
                 print_r($message);
             }

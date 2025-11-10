@@ -52,7 +52,7 @@
             }
             catch (PDOException $exception) {
 
-                error_log("Database connection failed: " . $exception->getMessage());
+                error_log("Database connection failed: " . $exception->getMessage() . "\n" . $exception->getTraceAsString());
                 throw new Exception("Connection error: " . $exception->getMessage());
 
             }
