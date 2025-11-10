@@ -44,6 +44,12 @@
         private bool $atomicOnNoRowsWill409 = false;
 
         /**
+         * Atomic flag to make singleRowReturn apply only to the next execute() call.
+         * @var bool
+         */
+        private bool $atomicSingleRowReturn = false;
+
+        /**
          * When enabled the execute() will return the first row as an associative array/object
          * instead of an array of rows.
          * @var bool
@@ -339,11 +345,14 @@
          * @param bool $enabled Set to `true` to enable returning the first row of results as an object instead
          *                      of an array. Default is `false`, meaning results will be returned as an array of
          *                      rows (even if only one row is returned).
+         * @param bool $atomic  Optional. When true the single-row return behavior will only apply to the next
+         *                      execute() call (atomic). Default is false.
          *
          * @return $this Returns the instance of the class to allow for method chaining.
          */
-        public function singleRowReturn(bool $enabled = true): static {
+        public function singleRowReturn(bool $enabled = true, bool $atomic = false): static {
 
+            $this->atomicSingleRowReturn = $atomic;
             $this->singleRowReturn = $enabled;
 
             return $this;
@@ -589,6 +598,10 @@
             if($this->atomicNoDataSave) {
                 $this->noDataSave = false;
                 $this->atomicNoDataSave = false;
+            }
+            if($this->atomicSingleRowReturn) {
+                $this->singleRowReturn = false;
+                $this->atomicSingleRowReturn = false;
             }
         }
 
