@@ -9,6 +9,7 @@
 
     /**
      * @property-read array|null $firstRow
+     * @property-read array|null $allRows
      */
     class MySqlTable {
 
@@ -26,7 +27,6 @@
         private bool $atomicOnNoRowsWill409 = false;
 
         private bool $singleRowReturn = false;
-        public bool $flatData = false;
         public bool $noDataSave = false;
         public bool $atomicNoDataSave = false;
         public bool $wasSuccess = false;
@@ -58,8 +58,11 @@
                 if(!empty($this->data)) {
                     return $this->data[0];
                 }
-
                 return [];
+            }
+
+            if ($property === 'allRows') {
+                return $this->data;
             }
 
             return null;
@@ -236,45 +239,6 @@
 
             $this->atomicNoDataSave = $atomic;
             $this->noDataSave = $enabled;
-
-            return $this;
-        }
-
-        /**
-         * Configures the output format of the data returned by SQL executions to be a flat, non-associative array.
-         * By default, the class returns results as an associative array, where each record is an associative array
-         * with column names as keys and their corresponding values as the values. This method, when enabled, alters the
-         * output format so that the data is returned as a flat, non-associative array, where each record is represented
-         * by a numerically indexed array of values.
-         *
-         * Example:
-         * - By default (when disabled), the result would look like:
-         *   ```
-         *   [
-         *     ["name" => "xxx", "address" => "xxx"],
-         *     ["name" => "xxx", "address" => "xxx"]
-         *   ]
-         *   ```
-         *
-         * - When enabled, the result would look like:
-         *   ```
-         *   [
-         *     ["xxx", "xxx"],
-         *     ["xxx", "xxx"]
-         *   ]
-         *   ```
-         *
-         * This is particularly useful when you prefer to work with data in a more compact, index-based format,
-         * rather than a key-value pair structure. It simplifies access to values by index rather than by column name.
-         *
-         * @param bool $enabled Set to `true` to enable flat, non-associative array output. Default is `true`.
-         *                      If set to `false`, the data will be returned in its default associative array format.
-         *
-         * @return $this Returns the instance of the class to allow for method chaining.
-         */
-        public function flatDataReturn(bool $enabled = true): static {
-
-            $this->flatData = $enabled;
 
             return $this;
         }
@@ -488,10 +452,13 @@
             $this->resetAtomicFlags();
 
             if(!$this->noDataSave) {
+
                 $this->data = $this->rowCount == 0 ? [] : TypeCaster::castValues($this->stmt);
+
                 if($this->singleRowReturn && !empty($this->data)) {
                     $this->data = $this->data[0];
                 }
+
             }
 
             return $this;
