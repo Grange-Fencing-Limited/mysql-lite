@@ -7,6 +7,18 @@
 
     class TypeCaster {
 
+        private const array FLOAT_TYPES = [
+            "NEWDECIMAL", "DOUBLE", "DECIMAL", "FLOAT", "NUMERIC",
+            "DEC", "FIXED", "REAL", "DOUBLE_PRECISION",
+        ];
+
+        private const array INT_TYPES = [
+            "LONG", "INT24", "TINYINT", "SMALLINT", "INTEGER",
+            "INT", "SHORT", "TINY", "MEDIUMINT", "BIT",
+        ];
+
+        private const string BIGINT_TYPE = "BIGINT";
+
         /**
          * Takes in a PDOStatement object and converts numerical values represented as strings into their respective
          * int and float types based on the SQL column meta-data for JSON output with numbers as numbers.
@@ -28,45 +40,55 @@
             $meta = [];
             $rows = [];
 
-            foreach(range(0, $stmt->columnCount() - 1) as $columnIndex) {
+            foreach(range(0, $stmt->columnCount() - 1) as $i) {
 
-                $columnMeta = $stmt->getColumnMeta($columnIndex);
+                $columnMeta = $stmt->getColumnMeta($i);
                 $meta[$columnMeta["name"]] = $columnMeta["native_type"] ?? "VAR_STRING";
 
             }
 
             while($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
 
-                $rowData = [];
+                $casted = [];
 
-                foreach($row as $key => $value) {
+                foreach($row as $name => $value) {
 
                     if($value == null) {
 
-                        $rowData[$key] = $value;
+                        $casted[$name] = null;
                         continue;
 
                     }
 
-                    if(in_array($meta[$key], ["NEWDECIMAL", "DOUBLE", "DECIMAL", "FLOAT", "NUMERIC", "DEC", "FIXED", "REAL", "DOUBLE_PRECISION"])) {
+                    $type = $meta[$name];
 
-                        $rowData[$key] = (float)$value;
+                    if(in_array($type, self::FLOAT_TYPES, true)) {
+                        $casted[$name] = (float)$value;
                         continue;
-
                     }
 
-                    if(in_array($meta[$key], ["LONG", "INT24", "TINYINT", "SMALLINT", "INTEGER", "INT", "SHORT", "TINY", "MEDIUMINT", "BIGINT", "BIT"])) {
-
-                        $rowData[$key] = (int)$value;
+                    if(in_array($type, self::INT_TYPES, true)) {
+                        $casted[$name] = (int)$value;
                         continue;
-
                     }
 
-                    $rowData[$key] = $value;
+                    if($type === self::BIGINT_TYPE) {
+                        // Only cast if safe within PHP_INT_MAX range
+                        // PHP_INT_SIZE check ensures portability
+                        if(is_numeric($value) && abs((float)$value) <= PHP_INT_MAX) {
+                            $casted[$name] = (int)$value;
+                        } else {
+                            // Keep as string to avoid overflow
+                            $casted[$name] = $value;
+                        }
+                        continue;
+                    }
+
+                    $casted[$name] = $value;
 
                 }
 
-                $rows[] = $rowData;
+                $rows[] = $casted;
 
             }
 
