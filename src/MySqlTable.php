@@ -8,12 +8,29 @@
     use PDOStatement;
 
     /**
-     * @property-read array|null $firstRow
-     * @property-read array|null $allRows
+     * Lightweight helper for executing PDO statements and handling common API responses.
+     *
+     * This class wraps a MySqlConnection and a prepared PDOStatement to run queries,
+     * automatically cast values, and optionally convert empty results into HTTP
+     * responses (204/401/403/409) via the Responses helper.
+     *
+     * @package GrangeFencing\MySqlLite
+     *
+     * @property-read array|null $firstRow First row of the last result set or empty array
+     * @property-read array|null $allRows  Alias for ->data
      */
     class MySqlTable {
 
+        /**
+         * Database connection wrapper. Contains the PDO connection and connection-level flags.
+         * @var MySqlConnection|null
+         */
         protected ?MySqlConnection $db = null;
+
+        /**
+         * Prepared statement to be executed. Set by prepareStatement()/prepareSql().
+         * @var PDOStatement|null
+         */
         public ?PDOStatement $stmt;
 
         private bool $onNoRowsWill204 = false;
@@ -26,32 +43,86 @@
         private bool $atomicOnNoRowsWill403 = false;
         private bool $atomicOnNoRowsWill409 = false;
 
+        /**
+         * When enabled the execute() will return the first row as an associative array/object
+         * instead of an array of rows.
+         * @var bool
+         */
         private bool $singleRowReturn = false;
+
+        /**
+         * When true the results from the current execution will not be saved into ->data.
+         * Useful for running statements where the application does not need the returned rows.
+         * @var bool
+         */
         public bool $noDataSave = false;
+
+        /**
+         * Atomic version of $noDataSave which only applies to the next execute() call.
+         * @var bool
+         */
         public bool $atomicNoDataSave = false;
+
+        /**
+         * Flag set to true after a successful execute(). Use to check status without throwing.
+         * @var bool
+         */
         public bool $wasSuccess = false;
+
+        /**
+         * Custom messages used when automatic response generation is enabled for the respective codes.
+         */
         private string $messageOn401 = "Invalid API key or key not set";
         private string $messageOn403 = "You do not have permission to complete this action";
         private string $messageOn409 = "The server was unable to handle this request to an existing record causing a conflict";
+
+        /**
+         * When execute() catches an exception it will be stored here for callers to inspect.
+         * @var Exception|null
+         */
         public Exception|null $failureCause;
 
         /**
          * @var array Automatically populated array of data returned from any executed sql query.
-         * If singleRowReturn enabled, the array with be associative, else will be an array of associative arrays.
+         * If singleRowReturn enabled, the array will be associative, else will be an array of associative arrays.
          */
         public array $data = [];
+        /**
+         * Number of rows affected/returned by the last statement.
+         * @var int
+         */
         public int $rowCount = 0;
 
+        /**
+         * Prepare a SQL statement using the internal connection.
+         *
+         * @param string $sql SQL to prepare.
+         * @return void
+         */
         public function prepareStatement($sql): void {
 
             $this->stmt = $this->db->conn->prepare($sql);
         }
 
+        /**
+         * Class constructor - accepts a MySqlConnection instance.
+         *
+         * @param MySqlConnection $database The database connection wrapper instance.
+         */
         public function __construct($database) {
 
             $this->db = $database;
         }
 
+        /**
+         * Magic getter for convenience properties.
+         *
+         * - firstRow: returns the first row of ->data or an empty array when no data.
+         * - allRows : returns ->data as-is.
+         *
+         * @param string $property Property name requested.
+         * @return mixed|null
+         */
         public function __get($property) {
 
             if($property === 'firstRow') {
@@ -394,6 +465,12 @@
             return $this;
         }
 
+        /**
+         * Prepares the SQL statement for execution.
+         *
+         * @param string $sql The SQL statement to prepare.
+         * @return static Returns the instance of the class to allow for method chaining.
+         */
         public function prepareSql(string $sql): static {
 
             $this->stmt = $this->db->conn->prepare($sql);
@@ -402,6 +479,13 @@
 
         }
 
+        /**
+         * Binds a value to a parameter in the prepared statement.
+         *
+         * @param string $parameter The parameter placeholder in the SQL statement.
+         * @param mixed $value The value to bind to the parameter.
+         * @return static Returns the instance of the class to allow for method chaining.
+         */
         public function bindParameter(string $parameter, mixed $value): static {
 
             $this->stmt->bindParam($parameter, $value);
@@ -508,6 +592,13 @@
             }
         }
 
+        /**
+         * Handles cases where no rows are affected by the last SQL execution.
+         * Depending on the configured flags, this may trigger automatic HTTP responses
+         * such as 204 No Content, 401 Unauthorized, 403 Forbidden, or 409 Conflict.
+         *
+         * @return void
+         */
         private function handleNoRowsCases(): void {
 
             if($this->rowCount == 0) {
@@ -526,6 +617,12 @@
             }
         }
 
+        /**
+         * Handles the failure of an execution, typically by rolling back a transaction
+         * if one is active, and setting the success flag to false.
+         *
+         * @return static Returns the instance of the class to allow for method chaining.
+         */
         function executionFailure(): static {
 
             $this->wasSuccess = false;
