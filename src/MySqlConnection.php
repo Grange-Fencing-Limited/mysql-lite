@@ -15,14 +15,14 @@
 
         public ?PDO $conn;
 
-        public function __construct() {
-            $this->connect();
+        public function __construct(array $overrideConnection = []) {
+            $this->connect($overrideConnection);
         }
 
         /**
          * @throws Exception
          */
-        public function connect(array $overrideConnection = []): ?PDO {
+        public function connect($overrideConnection): ?PDO {
 
             $this->conn = null;
 
