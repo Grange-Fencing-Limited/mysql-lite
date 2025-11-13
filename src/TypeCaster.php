@@ -33,7 +33,7 @@
             /**
              * This is the result of INSERT/UPDATE queries
              */
-            if($stmt->columnCount() == 0) {
+            if($stmt->columnCount() === 0) {
                 return [];
             }
 
@@ -53,7 +53,7 @@
 
                 foreach($row as $name => $value) {
 
-                    if($value == null) {
+                    if($value === null) {
 
                         $casted[$name] = null;
                         continue;
