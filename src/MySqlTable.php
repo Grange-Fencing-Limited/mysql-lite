@@ -21,6 +21,18 @@
      */
     class MySqlTable {
 
+        /**
+         * When true automatic responses (204/401/403/409) are enabled.
+         *
+         * @var bool
+         */
+        private bool $autoResponses = true;
+
+        /**
+         * Internal handler for automatic no-rows responses.
+         *
+         * @var NoRowsHandler
+         */
         private NoRowsHandler $noRowsHandler;
 
         /**
@@ -97,9 +109,11 @@
          * Class constructor - accepts a MySqlConnection instance.
          *
          * @param MySqlConnection $database The database connection wrapper instance.
+         * @param bool $autoResponses When true (default) automatic responses (204/401/403/409) are enabled.
          */
-        public function __construct(MySqlConnection $database) {
+        public function __construct(MySqlConnection $database, bool $autoResponses = true) {
 
+            $this->autoResponses = $autoResponses;
             $this->db = $database;
             $this->noRowsHandler = new NoRowsHandler();
 
@@ -408,7 +422,11 @@
                 $this->$property = $_SESSION[$sessionKey] ?? $default;
             } else {
                 if (!isset($_SESSION[$sessionKey])) {
-                    Responses::clientError("There is something wrong with the current session. Try refreshing the page or logging in again");
+                    if ($this->autoResponses) {
+                        Responses::clientError("There is something wrong with the current session. Try refreshing the page or logging in again");
+                    } else {
+                        throw new Exception("Session key '$sessionKey' is not set");
+                    }
                 }
                 $this->$property = $_SESSION[$sessionKey];
             }
@@ -480,7 +498,12 @@
                 if (!$this->stmt->execute()) {
 
                     $this->logError("Execution failed: " . json_encode($this->stmt->errorInfo()));
-                    Responses::serverError();
+
+                    if ($this->autoResponses) {
+                        Responses::serverError();
+                    } else {
+                        throw new Exception("SQL execution failed: " . json_encode($this->stmt->errorInfo()));
+                    }
 
                 }
 
@@ -496,7 +519,12 @@
 
                 $this->failureCause = $e;
                 $this->logError("PDOException: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-                Responses::serverError();
+
+                if ($this->autoResponses) {
+                    Responses::serverError();
+                } else {
+                    throw $e;
+                }
 
             }
 
