@@ -454,10 +454,16 @@
          *
          * @param string $parameter The parameter placeholder in the SQL statement.
          * @param mixed $value The value to bind to the parameter.
+         * @param int|null $type Optional. The data type for the parameter. Default is null, which means the type will be determined by PDO.
          *
          * @return static Returns the instance of the class to allow for method chaining.
          */
-        public function bindParameter(string $parameter, mixed $value): static {
+        public function bindParameter(string $parameter, mixed $value, ?int $type = null): static {
+
+            if ($type !== null) {
+                $this->stmt->bindParam($parameter, $value, $type);
+                return $this;
+            }
 
             $this->stmt->bindParam($parameter, $value);
 
