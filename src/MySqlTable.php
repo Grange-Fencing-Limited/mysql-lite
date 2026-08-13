@@ -91,7 +91,7 @@
          *
          * @var Exception|null
          */
-        public Exception|null $failureCause;
+        public ?Exception $failureCause = null;
 
         /**
          * @var array Automatically populated array of data returned from any executed sql query.
@@ -424,9 +424,8 @@
                 if (!isset($_SESSION[$sessionKey])) {
                     if ($this->autoResponses) {
                         Responses::clientError("There is something wrong with the current session. Try refreshing the page or logging in again");
-                    } else {
-                        throw new Exception("Session key '$sessionKey' is not set");
                     }
+                    $this->$property = null;
                 }
                 $this->$property = $_SESSION[$sessionKey];
             }
@@ -507,9 +506,11 @@
 
                     if ($this->autoResponses) {
                         Responses::serverError();
-                    } else {
-                        throw new Exception("SQL execution failed: " . json_encode($this->stmt->errorInfo()));
                     }
+
+                    $this->failureCause = $this->stmt->errorInfo();
+
+                    return $this;
 
                 }
 
@@ -528,9 +529,9 @@
 
                 if ($this->autoResponses) {
                     Responses::serverError();
-                } else {
-                    throw $e;
                 }
+
+                return $this;
 
             }
 
